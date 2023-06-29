@@ -7,51 +7,44 @@ export default {
 }
 
 async function handleRequest(request, env) {
-  let id = env.COUNTER.idFromName("A");
-  let obj = env.COUNTER.get(id);
-  let resp = await obj.fetch(request.url);
-  let count = await resp.text();
-
-  return new Response("Durable Object 'A' count: " + count);
+  let id = env.LOCATION.idFromName("A");
+  let obj = env.LOCATION.get(id);
+  // Forward the request to the remote Durable Object.
+  let resp = await obj.fetch(request);
+  // Return the response to the client.
+  return new Response(await resp.text());
 }
 
 // Durable Object
-
-export class Counter {
+export class Location {
   constructor(state, env) {
     this.state = state;
+    // Upon construction, we do not have a location to provide.
+    //
+    // This value will be updated as people access the Durable Object.
+    // When the Durable Object is evicted from memory, this will be reset!
+    this.location = null
   }
 
   // Handle HTTP requests from clients.
   async fetch(request) {
-    // Apply requested action.
-    let url = new URL(request.url);
+    let response = null
 
-    // Durable Object storage is automatically cached in-memory, so reading the
-    // same key every request is fast. (That said, you could also store the
-    // value in a class member if you prefer.)
-    let value = await this.state.storage.get("value") || 0;
+    if (this.location == null) {
+      response = new String(`
+This is the first request, we called the constructor, so this.location was null.
+We will set this.location to be your city: (${request.cf.city}). Try reloading the page!`);
+    } else {
+      response = new String(`
+The Durable Object was already loaded and running because it recently handled a request!
 
-    switch (url.pathname) {
-    case "/increment":
-      ++value;
-      break;
-    case "/decrement":
-      --value;
-      break;
-    case "/":
-      // Just serve the current value.
-      break;
-    default:
-      return new Response("Not found", {status: 404});
+Previous Location: ${this.location}
+New Location: ${request.cf.city}`);
     }
 
-    // We don't have to worry about a concurrent request having modified the
-    // value in storage because "input gates" will automatically protect against
-    // unwanted concurrency. So, read-modify-write is safe. For more details,
-    // see: https://blog.cloudflare.com/durable-objects-easy-fast-correct-choose-three/
-    await this.state.storage.put("value", value);
-
-    return new Response(value);
+    // We set the new location to be the new city.
+    this.location = request.cf.city;
+    console.log(response);
+    return new Response(response);
   }
 }
